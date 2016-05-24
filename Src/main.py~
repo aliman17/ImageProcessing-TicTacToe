@@ -240,12 +240,17 @@ def image_processing(root, img_name):
 
 
 def print_classification_to_file(output, classification):
+	"""Finally, store classification into text file"""
 	f = open(output, 'w')
 	for line in classification:
 		l = "".join(line)
 		f.write(l+'\n')
 	f.close()
 	
+
+####################################################################
+# RUN
+####################################################################
 
 # Explore folders
 for root, dirs, files in os.walk(inputImagePath):
@@ -254,7 +259,7 @@ for root, dirs, files in os.walk(inputImagePath):
 		if name.endswith((".bmp")):
 			IMG_ID += 1
 			classification = image_processing(root, name)
-			print_classification_to_file(outputPath+name[:-4]+".txt", classification)
+			print_classification_to_file(os.path.join(outputPath, name[:-4]+".txt"), classification)
 			
 			
 			
