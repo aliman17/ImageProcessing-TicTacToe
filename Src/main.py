@@ -1,0 +1,265 @@
+# Woow, I've never worked with images before! So amazing! I love 
+# this task. I've learned how to use openCV. 
+
+import os
+import sys
+import cv2	
+import numpy as np
+from scipy import misc
+
+inputImagePath = sys.argv[1]
+outputPath = sys.argv[2]
+
+IMG_ID = 0
+
+def significant_difference(prev_pix, new_pix):
+	"""We could use here statistics and check confidence intervals
+	but that would require more time and maybe at the end this will
+	be improved"""
+	diff = abs(int(new_pix[0]) - int(prev_pix[0]))
+	+ abs(int(new_pix[1]) - int(prev_pix[1]))
+	+ abs(int(new_pix[2]) - int(prev_pix[2]))
+	return diff > 20
+
+
+def iround(x):
+    """Round a number to the nearest integer."""
+    return int(round(x) - .5) + (x > 0)
+
+
+def grey(pix):
+	"""Just make a grey scale"""
+	grey = iround(0.2126 * pix[2] + 0.7152 * pix[1] + 0.0722 * pix[0])
+	return grey, grey, grey
+
+
+def to_grey(image_array):
+	"""Whole image array into grey"""
+	new_array = image_array[:]
+	height = len(image_array)
+	width = len(image_array[0])
+	for i in range(height):
+		for j in range(width):
+			new_array[i,j] = grey(image_array[i, j])
+	return new_array 
+
+
+def find_top(image_array):
+	"""Find the top of the grid so that we don't need
+	to consider padding arround"""
+	width = len(image_array[0])
+	height = len(image_array)
+	prev_pix = image_array[0,0]
+	for i in range(1, height):
+		for j in range(1, width):
+			new_pix = image_array[i, j]
+			if significant_difference(prev_pix, new_pix):
+				return i
+			else:
+				prev_pix = new_pix
+
+
+def find_bottom(image_array):
+	"""Find the bottom of the grid so that we don't need
+	to consider padding arround"""
+	width = len(image_array[0])
+	height = len(image_array)
+	prev_pix = image_array[height-1,0]
+	for i in range(height-1, -1, -1):
+		for j in range(1, width):
+			new_pix = image_array[i, j]
+			if significant_difference(prev_pix, new_pix):
+				return i
+			else:
+				prev_pix = new_pix
+
+
+def find_left(image_array):
+	"""Find the left side of the grid so that we don't need
+	to consider padding arround"""
+	width = len(image_array[0])
+	height = len(image_array)
+	prev_pix = image_array[0,0]
+	for j in range(1, width):
+		for i in range(1, height):	
+			new_pix = image_array[i, j]
+			if significant_difference(prev_pix, new_pix):
+				return j
+			else:
+				prev_pix = new_pix
+
+
+def find_right(image_array):
+	"""Find the right side of the grid so that we don't need
+	to consider padding arround"""
+	width = len(image_array[0])
+	height = len(image_array)
+	prev_pix = image_array[0,width-1]
+	for j in range(width-1, -1, -1):
+		for i in range(1, height):	
+			new_pix = image_array[i, j]
+			if significant_difference(prev_pix, new_pix):
+				return j
+			else:
+				prev_pix = new_pix
+
+
+def find_approx_centers(image_array, top, bottom, left, right):
+	"""top, bottom, left, right represents coordinates of cropped 
+	image. Then the centers are computed and returned in 3x3 matrix."""
+	height = bottom - top
+	width = right - left
+	centers = []
+	for i in range(3):
+		line = []
+		for j in range(3):
+			# i,j coordinates
+			center = ( top + int((i+0.5)* height/3) , left + int((j+0.5)* width/3))
+			line.append(center)
+		centers.append(line)
+	return centers
+
+
+def find_object_from_center(image_array, center):
+	"""This is not the best function but still, looks around
+	the center and try to detect some figures"""
+	prev_pix = image_array[center[0], center[1]]
+	for i in range(-10, 10):
+		for j in range(-10, 10):
+			pix = image_array[center[0] + i, center[1]+j]
+			if significant_difference(prev_pix, pix):
+				# The object found
+				return i, j
+	return None
+
+
+def print_center(image_array, centers, classification):
+	"""Helper function to print out the centers on the image
+	for easier understanding what's going on"""
+	new_array = image_array[:]
+	for i in range(3):
+		for j in range(3):
+			center = centers[i][j]
+			color = [0 , 0 , 0]
+			typ = classification[i][j]
+			if typ == 'O':
+				color = [0, 255, 0]
+			elif typ == 'X':
+				color = [0, 0, 0]
+			else:
+				color = [225, 225, 225]
+			for k in range(-10, 10):
+				for l in range(-10, 10):
+					new_array[center[0] + k, center[1]+l] = color
+	new_image = misc.toimage(new_array)
+	misc.imsave("./centers"+str(IMG_ID)+".bmp", new_image)
+
+
+def closest_center_ind(circle, centers):	
+	"""Finds the closest center to the given image"""
+	min_diff = 256
+	best_index = 0
+	index = 0, 0
+	for i in range(3):
+		for j in range(3):
+			center = centers[i][j]
+			diff = abs(center[0] - circle[1]) + abs(center[1] - circle[0])
+			if diff < min_diff:
+				min_diff = diff
+				best_index = i, j
+	return best_index
+
+
+def classify_circles(img_path, print_yes = False):
+	"""Finds circlen on the image and returns list of them"""
+	img = cv2.imread(img_path,0)
+	img = cv2.medianBlur(img,1)
+	cimg = cv2.cvtColor(img,cv2.COLOR_GRAY2BGR)
+	circles = cv2.HoughCircles(img,cv2.HOUGH_GRADIENT,1,20,
+				param1=55,param2=40,minRadius=0,maxRadius=0)
+	circles = np.uint16(np.around(circles))
+
+	if print_yes:
+		for i in circles[0,:]:
+			# draw the outer circle
+			cv2.circle(cimg,(i[0],i[1]),i[2],(0,255,0),2)
+			# draw the center of the circle
+			cv2.circle(cimg,(i[0],i[1]),2,(0,0,255),3)
+
+		cv2.imshow('detected circles',cimg)
+		cv2.waitKey(0)
+		cv2.destroyAllWindows()
+	return circles
+
+
+def classify(image_array, centers, img_path):
+	"""Classify cross, circle or an empty field"""
+	# Clasification of circles
+	circles = classify_circles(img_path)
+	classification = [["-", "-",  "-"], 
+					  ["-", "-",  "-"], 
+					  ["-", "-",  "-"]]
+	for circle in circles[0]:
+		best_center_index = closest_center_ind(circle, centers)
+		classification[best_center_index[0]][best_center_index[1]] = "O" 
+
+	# Classify the rest
+	for i in range(3):
+		for j in range(3):
+			if classification[i][j] != 'O':
+				center = centers[i][j]
+				coord = find_object_from_center(image_array, center)
+				if coord:
+					classification[i][j] = 'X'
+	return classification
+
+
+def image_processing(root, img_name):
+	"""Crop image, create grey scale and count for each grey
+	color number of it's occurance"""
+	# Parse image
+	image = misc.imread(os.path.join(root,img_name), flatten= 0)
+	image_array = misc.bytescale(image)
+	#image_array = to_grey(image_array)
+
+	# Crop image
+	top = find_top(image_array)
+	bottom = find_bottom(image_array)
+	left = find_left(image_array)
+	right = find_right(image_array)
+
+	# Find some orientation with center search
+	centers = find_approx_centers(image_array, top, bottom, left, right)
+
+	# Classify centers
+	classification = classify(image_array, centers, os.path.join(root,img_name))
+
+	# Debug
+	#print_center(image_array, centers, classification)
+	return classification
+
+
+def print_classification_to_file(output, classification):
+	"""Finally, store classification into text file"""
+	f = open(output, 'w')
+	for line in classification:
+		l = "".join(line)
+		f.write(l+'\n')
+	f.close()
+	
+
+####################################################################
+# RUN
+####################################################################
+
+# Explore folders
+for root, dirs, files in os.walk(inputImagePath):
+	root = root if root[-1] == '/' else root+'/'
+	for name in files:
+		if name.endswith((".bmp")):
+			IMG_ID += 1
+			classification = image_processing(root, name)
+			print_classification_to_file(outputPath+name[:-4]+".txt", classification)
+			
+			
+			
